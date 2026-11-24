@@ -6,7 +6,6 @@ import {
   Bookmark,
   Check,
   Columns3,
-  Compass,
   Filter,
   Info,
   Lock,
@@ -33,6 +32,7 @@ import {
   useShortlist,
   type SavedCreatorItem,
 } from "@/lib/shortlist/useShortlist";
+import { BrandMark } from "./BrandLogo";
 import { CreatorCard } from "./CreatorCard";
 import { DestinationCombobox } from "./DestinationCombobox";
 import { PlatformIcon } from "./PlatformIcon";
@@ -431,9 +431,7 @@ export function SearchExplorer({
         <div className="relative mx-auto max-w-5xl px-4 pt-6 pb-20 sm:px-6 sm:pt-8 sm:pb-24">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15 ring-1 ring-white/20 backdrop-blur-xs">
-                <Compass className="h-5 w-5 text-emerald-200" />
-              </span>
+              <BrandMark className="h-10 w-10 shrink-0 rounded-xl shadow-sm ring-1 ring-white/25" />
               <div>
                 <span className="text-lg font-extrabold tracking-tight">
                   TravelVlogFinder
@@ -809,7 +807,15 @@ export function SearchExplorer({
         {/* Results Section */}
         <section ref={resultsRef} className="mt-7" aria-live="polite">
           {/* Trip Summary Header + Group Split + Spend Breakdown + Disclaimer */}
-          <div className="rounded-2xl border border-stone-200/90 bg-white p-4 shadow-xs sm:p-5">
+          <div className="relative overflow-hidden rounded-2xl border border-stone-200/90 bg-white p-4 shadow-xs sm:p-5">
+            {loading && (
+              <div
+                aria-hidden="true"
+                className="absolute inset-x-0 top-0 h-1 overflow-hidden bg-emerald-100"
+              >
+                <div className="tvf-indeterminate-bar h-full w-1/2 rounded-full bg-emerald-700" />
+              </div>
+            )}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-lg font-extrabold tracking-tight text-stone-900 sm:text-xl">
@@ -1060,7 +1066,11 @@ export function SearchExplorer({
               </div>
             </div>
           ) : (
-            <div className="mt-5 space-y-4">
+            <div
+              className={`mt-5 space-y-4 transition-opacity duration-200 ${
+                loading ? "opacity-60" : "opacity-100"
+              }`}
+            >
               {results.creators.map((creator) => (
                 <CreatorCard
                   key={creator.id}

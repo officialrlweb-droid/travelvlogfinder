@@ -5,10 +5,8 @@ import Link from "next/link";
 import {
   ArrowLeft,
   BadgeCheck,
-  Compass,
   FileSpreadsheet,
   Inbox,
-  Lock,
   LogOut,
   Pencil,
   Plus,
@@ -23,6 +21,7 @@ import type {
   AdminCreatorRecord,
   AdminSubmissionRecord,
 } from "@/lib/admin/repository";
+import { BrandMark } from "@/components/BrandLogo";
 import { PlatformIcon } from "@/components/PlatformIcon";
 import { ClaimsPanel } from "./ClaimsPanel";
 import { CreatorFormModal } from "./CreatorFormModal";
@@ -182,9 +181,7 @@ export function AdminDashboard({
       <div className="flex min-h-screen flex-col items-center justify-center bg-stone-50 px-4 py-12">
         <div className="w-full max-w-md rounded-3xl border border-stone-200 bg-white p-6 shadow-xl shadow-stone-900/5 sm:p-8">
           <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-900 text-emerald-200">
-              <Lock className="h-5 w-5" />
-            </span>
+            <BrandMark className="h-11 w-11 shrink-0 rounded-xl shadow-sm" />
             <div>
               <h1 className="text-xl font-extrabold text-stone-900">
                 TravelVlogFinder Admin
@@ -258,9 +255,7 @@ export function AdminDashboard({
       <header className="bg-emerald-950 text-white">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
           <div className="flex items-center gap-2.5">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15">
-              <Compass className="h-5 w-5 text-emerald-200" />
-            </span>
+            <BrandMark className="h-10 w-10 shrink-0 rounded-xl ring-1 ring-white/20" />
             <div>
               <h1 className="text-base font-extrabold tracking-tight sm:text-lg">
                 TravelVlogFinder Admin

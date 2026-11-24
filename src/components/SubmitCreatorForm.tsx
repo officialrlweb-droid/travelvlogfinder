@@ -5,12 +5,12 @@ import Link from "next/link";
 import {
   ArrowLeft,
   CheckCircle2,
-  Compass,
   Plus,
   Send,
   Trash2,
   Video,
 } from "lucide-react";
+import { BrandMark } from "./BrandLogo";
 import {
   ALL_PLACES,
   BEST_SEASON_OPTIONS,
@@ -159,9 +159,7 @@ export function SubmitCreatorForm() {
         <div className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
           <div className="flex items-center justify-between gap-3">
             <Link href="/" className="flex items-center gap-2.5">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15">
-                <Compass className="h-5 w-5 text-emerald-200" />
-              </span>
+              <BrandMark className="h-10 w-10 shrink-0 rounded-xl shadow-sm ring-1 ring-white/25" />
               <span className="text-lg font-extrabold tracking-tight">
                 TravelVlogFinder
               </span>

@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import { AppSplashLoader } from "@/components/AppSplashLoader";
+import { TopNavProgressBar } from "@/components/TopNavProgressBar";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -21,6 +23,8 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen antialiased selection:bg-emerald-100 selection:text-emerald-950">
+        <AppSplashLoader />
+        <TopNavProgressBar />
         {children}
       </body>
     </html>

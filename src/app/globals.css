@@ -28,3 +28,71 @@ body {
     sans-serif;
   text-rendering: optimizeLegibility;
 }
+
+@keyframes tvf-progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(15%);
+  }
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes tvf-bar-fill {
+  0% {
+    transform: scaleX(0);
+  }
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes tvf-compass-float {
+  0%,
+  100% {
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    transform: translateY(-4px) scale(1.03);
+  }
+}
+
+@keyframes tvf-ring-pulse {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.45;
+  }
+  100% {
+    transform: scale(1.42);
+    opacity: 0;
+  }
+}
+
+.tvf-indeterminate-bar {
+  animation: tvf-progress-slide 1.25s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.tvf-splash-bar {
+  transform-origin: left center;
+  animation: tvf-bar-fill 1080ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.tvf-compass-motion {
+  animation: tvf-compass-float 1.35s ease-in-out infinite;
+}
+
+.tvf-ring-motion {
+  animation: tvf-ring-pulse 1.35s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tvf-indeterminate-bar,
+  .tvf-splash-bar,
+  .tvf-compass-motion,
+  .tvf-ring-motion {
+    animation: none;
+  }
+}
