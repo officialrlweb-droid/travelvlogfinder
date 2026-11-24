@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
     const sp = request.nextUrl.searchParams;
     const region = sp.get("region") || undefined;
     const place = sp.get("place") || undefined;
+    const places = parseListParam(sp, "places");
 
     const rawDays = sp.get("days");
     const days = rawDays ? Number(rawDays) : undefined;
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const rawBudget = sp.get("totalBudget");
+    const rawBudget = sp.get("totalBudget") ?? sp.get("budget");
     const totalBudget = rawBudget ? Number(rawBudget) : undefined;
     if (
       rawBudget &&
@@ -35,6 +36,18 @@ export async function GET(request: NextRequest) {
     ) {
       return NextResponse.json(
         { error: "Total budget must be a valid positive INR amount." },
+        { status: 400 }
+      );
+    }
+
+    const rawTravelers = sp.get("travelers");
+    const travelers = rawTravelers ? Number(rawTravelers) : 1;
+    if (
+      rawTravelers &&
+      (!Number.isFinite(travelers) || travelers < 1 || travelers > 20)
+    ) {
+      return NextResponse.json(
+        { error: "Travelers must be between 1 and 20." },
         { status: 400 }
       );
     }
@@ -52,8 +65,10 @@ export async function GET(request: NextRequest) {
     const result = await searchCreators({
       region,
       place,
+      places,
       days,
       totalBudget,
+      travelers,
       styles,
       languages,
       platform,

@@ -4,6 +4,8 @@ import { BUDGET_DISCLAIMER_NOTE } from "@/lib/constants/taxonomy";
 import { getDb, resetDbInstance } from "@/lib/db/client";
 import { runMigrations, seedDatabase } from "@/lib/db/init";
 import { parseOfficialEmbed } from "@/lib/embeds/official-embed";
+import { calculateSpendBreakdown } from "@/lib/search/budget";
+import { getCreatorProfileById } from "@/lib/search/profile";
 import { searchCreators } from "@/lib/search/query";
 
 describe("TravelVlogFinder PostgreSQL Search & Matching", () => {
@@ -237,5 +239,87 @@ describe("TravelVlogFinder PostgreSQL Search & Matching", () => {
 
     const invalid = parseOfficialEmbed("https://example.com/video/123");
     assert.equal(invalid, null);
+  });
+
+  it("loads an in-app Instagram-style creator profile with all videos and similar creators", async () => {
+    const db = getDb();
+    const res = await searchCreators({ place: "Wayanad" }, db);
+    const first = res.creators[0];
+    assert.ok(first);
+
+    const profile = await getCreatorProfileById(first.id, db);
+    assert.ok(profile);
+    assert.equal(profile!.id, first.id);
+    assert.equal(profile!.name, first.name);
+    assert.ok(profile!.videos.length >= 1);
+    assert.ok(profile!.similarCreators.length >= 1);
+    assert.ok(
+      profile!.similarCreators.every((s) => s.id !== first.id),
+      "Similar creators should not include the profile itself"
+    );
+
+    const missing = await getCreatorProfileById("not-a-uuid", db);
+    assert.equal(missing, null);
+  });
+
+  it("supports multi-stop Kerala route matching, ranking full-route creators first and building Watchlist Combos", async () => {
+    const db = getDb();
+
+    // Wayanad + Munnar: Ghats & Mist and Kerala on a Shoestring cover both stops
+    const bothRes = await searchCreators(
+      {
+        region: "Kerala, India",
+        places: ["Wayanad", "Munnar"],
+        days: 4,
+        totalBudget: 12000,
+        travelers: 4,
+      },
+      db
+    );
+
+    assert.equal(bothRes.tripSummary.perDayBudget, 3000);
+    assert.equal(bothRes.tripSummary.travelers, 4);
+    assert.ok(bothRes.tripSummary.spendBreakdown);
+    assert.equal(bothRes.tripSummary.spendBreakdown!.groupTotalPerDay, 12000);
+    assert.ok(bothRes.tripSummary.routeCombo);
+    assert.equal(
+      bothRes.tripSummary.routeCombo!.allStopsCoveredBySingleCreator,
+      true
+    );
+    assert.equal(bothRes.creators[0].matchedPlaces.length, 2);
+
+    // Wayanad + Munroe Island: no single creator covers both -> Watchlist Combo pairs best creator per stop
+    const comboRes = await searchCreators(
+      {
+        region: "Kerala, India",
+        places: ["Wayanad", "Munroe Island"],
+        days: 2,
+        totalBudget: 6000,
+      },
+      db
+    );
+    assert.ok(comboRes.tripSummary.routeCombo);
+    assert.equal(
+      comboRes.tripSummary.routeCombo!.allStopsCoveredBySingleCreator,
+      false
+    );
+    assert.equal(comboRes.tripSummary.routeCombo!.stops.length, 2);
+    assert.ok(comboRes.tripSummary.routeCombo!.stops[0].creator);
+    assert.ok(comboRes.tripSummary.routeCombo!.stops[1].creator);
+    assert.equal(comboRes.tripSummary.routeCombo!.uniqueCreatorIds.length, 2);
+  });
+
+  it("calculates Kerala daily spend split and group room/cab sharing pools accurately", () => {
+    const solo = calculateSpendBreakdown(2500, 1);
+    assert.equal(
+      solo.stayPerDay + solo.foodPerDay + solo.localTravelPerDay,
+      2500
+    );
+    assert.equal(solo.groupTotalPerDay, 2500);
+
+    const group4 = calculateSpendBreakdown(2500, 4);
+    assert.equal(group4.groupTotalPerDay, 10000);
+    assert.equal(group4.sharedRoomBudgetPerNight, group4.stayPerDay * 3);
+    assert.equal(group4.sharedLocalTravelPerDay, group4.localTravelPerDay * 4);
   });
 });

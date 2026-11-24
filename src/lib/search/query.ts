@@ -5,11 +5,14 @@ import {
 } from "@/lib/constants/taxonomy";
 import type { DbClient } from "@/lib/db/client";
 import { ensureDatabaseReady } from "@/lib/db/init";
+import { calculateSpendBreakdown } from "./budget";
 import type {
   BudgetFit,
   BudgetMatchLevel,
   CreatorSearchResult,
   FeaturedVideo,
+  RouteComboStop,
+  RouteWatchlistCombo,
   SearchFilters,
   SearchResponse,
 } from "./types";
@@ -33,6 +36,7 @@ interface CreatorDbRow {
   verified: boolean;
   last_checked: string | Date;
   budget_fit_tier: number | null;
+  matched_places_count: number;
 }
 
 interface VideoDbRow {
@@ -98,19 +102,21 @@ export function classifyBudgetMatchLevel(
 
 export function formatTripHeader(
   days: number | null,
-  perDayBudget: number | null
+  perDayBudget: number | null,
+  travelers = 1
 ): string | null {
   if (!days || !perDayBudget) {
     return null;
   }
   const dayLabel = days === 1 ? "day" : "days";
+  if (travelers > 1) {
+    return `Your trip: ${days} ${dayLabel} x Rs ${formatInrNumber(
+      perDayBudget
+    )}/person/day (${travelers} travelers)`;
+  }
   return `Your trip: ${days} ${dayLabel} x Rs ${formatInrNumber(perDayBudget)}/day`;
 }
 
-/**
- * Builds a safe prefix tsquery string (e.g. "wayanad cafe" -> "wayanad:* & cafe:*")
- * so partial keyword typing works alongside Postgres websearch_to_tsquery.
- */
 function buildPrefixTsQueryString(raw: string): string | null {
   const tokens = raw
     .trim()
@@ -123,6 +129,67 @@ function buildPrefixTsQueryString(raw: string): string | null {
   return tokens.map((t) => `${t}:*`).join(" & ");
 }
 
+function normalizeSelectedPlaces(filters: SearchFilters): string[] {
+  const combined: string[] = [];
+  if (Array.isArray(filters.places)) {
+    for (const p of filters.places) {
+      const trimmed = p.trim();
+      if (trimmed && !combined.includes(trimmed)) {
+        combined.push(trimmed);
+      }
+    }
+  }
+  if (filters.place?.trim() && !combined.includes(filters.place.trim())) {
+    combined.push(filters.place.trim());
+  }
+  return combined.slice(0, 3);
+}
+
+function buildRouteCombo(
+  selectedPlaces: string[],
+  creators: CreatorSearchResult[]
+): RouteWatchlistCombo | null {
+  if (selectedPlaces.length < 2) {
+    return null;
+  }
+
+  const allStopsCoveredBySingleCreator = creators.some(
+    (c) => c.matchedPlaces.length === selectedPlaces.length
+  );
+
+  // Pick the highest-ranked matching creator for each stop (already ordered by exact budget fit)
+  const stops: RouteComboStop[] = selectedPlaces.map((stopName) => {
+    const best = creators.find((c) =>
+      c.placesCovered.some((p) => p.toLowerCase() === stopName.toLowerCase())
+    );
+    return {
+      place: stopName,
+      creator: best
+        ? {
+            id: best.id,
+            name: best.name,
+            platform: best.platform,
+            followersRange: best.followersRange,
+            budgetMinPerDay: best.budgetMinPerDay,
+            budgetMaxPerDay: best.budgetMaxPerDay,
+            verified: best.verified,
+            budgetFit: best.budgetFit,
+          }
+        : null,
+    };
+  });
+
+  const uniqueCreatorIds = Array.from(
+    new Set(stops.map((s) => s.creator?.id).filter((id): id is string => Boolean(id)))
+  );
+
+  return {
+    stops,
+    allStopsCoveredBySingleCreator,
+    uniqueCreatorIds,
+  };
+}
+
 export async function searchCreators(
   filters: SearchFilters,
   dbOverride?: DbClient
@@ -130,7 +197,8 @@ export async function searchCreators(
   const db = dbOverride ?? (await ensureDatabaseReady());
 
   const region = filters.region?.trim() || DEFAULT_REGION;
-  const place = filters.place?.trim() || null;
+  const selectedPlaces = normalizeSelectedPlaces(filters);
+  const primaryPlace = selectedPlaces.length === 1 ? selectedPlaces[0] : null;
   const days =
     typeof filters.days === "number" && Number.isFinite(filters.days) && filters.days >= 1
       ? Math.floor(filters.days)
@@ -141,6 +209,12 @@ export async function searchCreators(
     filters.totalBudget > 0
       ? Math.round(filters.totalBudget)
       : null;
+  const travelers =
+    typeof filters.travelers === "number" &&
+    Number.isFinite(filters.travelers) &&
+    filters.travelers >= 1
+      ? Math.min(20, Math.floor(filters.travelers))
+      : 1;
   const perDayBudget = calculatePerDayBudget(totalBudget ?? undefined, days ?? undefined);
   const styles = (filters.styles ?? []).map((s) => s.trim()).filter(Boolean);
   const languages = (filters.languages ?? []).map((l) => l.trim()).filter(Boolean);
@@ -163,10 +237,22 @@ export async function searchCreators(
   const regionParam = addParam(region);
   whereClauses.push(`c.region = ${regionParam}`);
 
-  // Specific place/district filter using GIN index on places_covered
-  if (place) {
-    const placeParam = addParam([place]);
+  // Single or multi-stop destination filter using GIN index on places_covered
+  let matchedPlacesCountExpr = "0::integer";
+  if (selectedPlaces.length === 1) {
+    const placeParam = addParam(selectedPlaces);
     whereClauses.push(`c.places_covered @> ${placeParam}::text[]`);
+    matchedPlacesCountExpr = "1::integer";
+  } else if (selectedPlaces.length > 1) {
+    const placesParam = addParam(selectedPlaces);
+    whereClauses.push(`c.places_covered && ${placesParam}::text[]`);
+    matchedPlacesCountExpr = `
+      (
+        SELECT COUNT(*)::integer
+        FROM unnest(c.places_covered) AS p
+        WHERE p = ANY(${placesParam}::text[])
+      )
+    `;
   }
 
   // Selected days must fall within creator's [min_days, max_days]
@@ -177,15 +263,7 @@ export async function searchCreators(
     );
   }
 
-  // Budget eligibility + Exact-Match-First ranking:
-  // Eligible if creator's minimum daily budget is affordable (budget_min_per_day <= perDayBudget).
-  // Ranked by closeness to the traveler's per-day budget:
-  // - Tier 0 ("exact"): Full range fits inside budget AND max is within 85%-100% of perDayBudget
-  //   (sorted by smallest gap to perDayBudget first, so budget_max_per_day == perDayBudget is #1)
-  // - Tier 1 ("overlap"): Creator's [min, max] directly contains perDayBudget (min <= B < max),
-  //   sorted by smallest overage (budget_max_per_day - B) ASC
-  // - Tier 2 ("under"): Lower-budget full fits (budget_max_per_day < 85% of B),
-  //   sorted closest-to-budget first (B - budget_max_per_day) ASC
+  // Budget eligibility + Exact-Match-First ranking
   let budgetFitTierExpr = "NULL::integer";
   let budgetOrderExpr = "";
   if (perDayBudget !== null) {
@@ -271,6 +349,10 @@ export async function searchCreators(
   }
 
   const orderByParts: string[] = [];
+  if (selectedPlaces.length > 1) {
+    // Multi-stop routes rank creators covering more selected stops first
+    orderByParts.push("matched_places_count DESC");
+  }
   if (budgetOrderExpr) {
     orderByParts.push(budgetOrderExpr);
   }
@@ -299,6 +381,7 @@ export async function searchCreators(
       c.verified,
       c.last_checked,
       ${budgetFitTierExpr} AS budget_fit_tier,
+      ${matchedPlacesCountExpr} AS matched_places_count,
       ${ftsRankExpr} AS fts_rank
     FROM creators c
     WHERE ${whereClauses.join(" AND ")}
@@ -312,9 +395,9 @@ export async function searchCreators(
   if (creatorIds.length > 0) {
     const videoParams: unknown[] = [creatorIds];
     let placeMatchExpr = "0";
-    if (place) {
-      videoParams.push([place]);
-      placeMatchExpr = `CASE WHEN v.places @> $2::text[] THEN 1 ELSE 0 END`;
+    if (selectedPlaces.length > 0) {
+      videoParams.push(selectedPlaces);
+      placeMatchExpr = `CASE WHEN v.places && $2::text[] THEN 1 ELSE 0 END`;
     }
 
     const videosRes = await db.query<VideoDbRow>(
@@ -366,6 +449,8 @@ export async function searchCreators(
     }
   }
 
+  const selectedLower = new Set(selectedPlaces.map((p) => p.toLowerCase()));
+
   const creators: CreatorSearchResult[] = creatorsRes.rows.map((row) => {
     const budgetFit: BudgetFit | null =
       perDayBudget !== null
@@ -390,6 +475,12 @@ export async function searchCreators(
         ? row.last_checked.toISOString().slice(0, 10)
         : String(row.last_checked).slice(0, 10);
 
+    const placesCovered = row.places_covered ?? [];
+    const matchedPlaces =
+      selectedPlaces.length > 0
+        ? placesCovered.filter((p) => selectedLower.has(p.toLowerCase()))
+        : [];
+
     return {
       id: row.id,
       name: row.name,
@@ -397,7 +488,8 @@ export async function searchCreators(
       profileLink: row.profile_link,
       followersRange: row.followers_range,
       region: row.region,
-      placesCovered: row.places_covered ?? [],
+      placesCovered,
+      matchedPlaces,
       travelStyle: row.travel_style ?? [],
       budgetMinPerDay: row.budget_min_per_day,
       budgetMaxPerDay: row.budget_max_per_day,
@@ -416,15 +508,26 @@ export async function searchCreators(
     };
   });
 
+  const spendBreakdown =
+    perDayBudget !== null
+      ? calculateSpendBreakdown(perDayBudget, travelers)
+      : null;
+
+  const routeCombo = buildRouteCombo(selectedPlaces, creators);
+
   return {
     tripSummary: {
       region,
-      place,
+      place: primaryPlace,
+      places: selectedPlaces,
       days,
       totalBudget,
+      travelers,
       perDayBudget: perDayBudget !== null ? Math.round(perDayBudget) : null,
-      headerText: formatTripHeader(days, perDayBudget),
+      headerText: formatTripHeader(days, perDayBudget, travelers),
       budgetNote: BUDGET_DISCLAIMER_NOTE,
+      spendBreakdown,
+      routeCombo,
     },
     totalCount: creators.length,
     creators,

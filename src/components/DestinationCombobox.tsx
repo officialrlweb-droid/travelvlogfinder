@@ -1,18 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, MapPin, Search, X } from "lucide-react";
+import { Check, ChevronDown, MapPin, Search, X } from "lucide-react";
 import { DEFAULT_REGION, REGIONS } from "@/lib/constants/taxonomy";
 
 interface DestinationComboboxProps {
   region: string;
-  place: string;
-  onChange: (next: { region: string; place: string }) => void;
+  places: string[];
+  onChange: (next: { region: string; places: string[] }) => void;
 }
+
+const MAX_STOPS = 3;
 
 export function DestinationCombobox({
   region,
-  place,
+  places,
   onChange,
 }: DestinationComboboxProps) {
   const [open, setOpen] = useState(false);
@@ -40,7 +42,7 @@ export function DestinationCombobox({
         return { ...reg, regionMatches: true };
       }
       const regionMatches = reg.name.toLowerCase().includes(q);
-      const places = reg.places.filter(
+      const matched = reg.places.filter(
         (p) =>
           p.name.toLowerCase().includes(q) ||
           p.district.toLowerCase().includes(q) ||
@@ -49,35 +51,53 @@ export function DestinationCombobox({
       return {
         ...reg,
         regionMatches,
-        places: regionMatches && places.length === 0 ? reg.places : places,
+        places: regionMatches && matched.length === 0 ? reg.places : matched,
       };
     }).filter((reg) => reg.regionMatches || reg.places.length > 0);
   }, [query]);
 
-  const displayLabel = place
-    ? `${place}, ${region}`
-    : `${region || DEFAULT_REGION} (All places)`;
+  const displayLabel =
+    places.length === 0
+      ? `${region || DEFAULT_REGION} (All places)`
+      : places.length === 1
+        ? `${places[0]}, ${region || DEFAULT_REGION}`
+        : `${places.join(" + ")}`;
 
   const handleSelectRegion = (selectedRegion: string) => {
-    onChange({ region: selectedRegion, place: "" });
+    onChange({ region: selectedRegion, places: [] });
     setQuery("");
     setOpen(false);
   };
 
-  const handleSelectPlace = (selectedRegion: string, selectedPlace: string) => {
-    onChange({ region: selectedRegion, place: selectedPlace });
+  const handleTogglePlace = (selectedRegion: string, selectedPlace: string) => {
+    const exists = places.includes(selectedPlace);
+    let nextPlaces: string[];
+    if (exists) {
+      nextPlaces = places.filter((p) => p !== selectedPlace);
+    } else if (places.length >= MAX_STOPS) {
+      nextPlaces = [...places.slice(1), selectedPlace];
+    } else {
+      nextPlaces = [...places, selectedPlace];
+    }
+    onChange({ region: selectedRegion, places: nextPlaces });
     setQuery("");
-    setOpen(false);
   };
 
   return (
     <div ref={containerRef} className="relative">
-      <label
-        htmlFor="destination-trigger"
-        className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-stone-600"
-      >
-        Destination
-      </label>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <label
+          htmlFor="destination-trigger"
+          className="block text-xs font-semibold uppercase tracking-wide text-stone-600"
+        >
+          Destination
+        </label>
+        <span className="text-[11px] font-medium text-stone-400">
+          {places.length > 1
+            ? `${places.length}-stop route`
+            : "1–3 Kerala stops"}
+        </span>
+      </div>
 
       <div className="relative">
         <button
@@ -96,20 +116,20 @@ export function DestinationCombobox({
             <span className="truncate">{displayLabel}</span>
           </span>
           <span className="flex shrink-0 items-center gap-1">
-            {place && (
+            {places.length > 0 && (
               <span
                 role="button"
                 tabIndex={0}
-                aria-label="Clear selected place"
+                aria-label="Clear selected places"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onChange({ region: region || DEFAULT_REGION, place: "" });
+                  onChange({ region: region || DEFAULT_REGION, places: [] });
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     e.stopPropagation();
-                    onChange({ region: region || DEFAULT_REGION, place: "" });
+                    onChange({ region: region || DEFAULT_REGION, places: [] });
                   }
                 }}
                 className="rounded-md p-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700"
@@ -126,10 +146,38 @@ export function DestinationCombobox({
         </button>
       </div>
 
+      {/* Selected Multi-Stop Pills */}
+      {places.length > 1 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {places.map((p) => (
+            <span
+              key={p}
+              className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-900 ring-1 ring-emerald-200"
+            >
+              {p}
+              <button
+                type="button"
+                aria-label={`Remove ${p}`}
+                onClick={() =>
+                  onChange({
+                    region: region || DEFAULT_REGION,
+                    places: places.filter((x) => x !== p),
+                  })
+                }
+                className="rounded p-0.5 text-emerald-700 hover:bg-emerald-100"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
       {open && (
         <div
           role="listbox"
-          aria-label="Select region or place"
+          aria-label="Select region or up to 3 places"
+          aria-multiselectable="true"
           className="absolute z-40 mt-2 w-full overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-xl"
         >
           <div className="border-b border-stone-100 p-2.5">
@@ -143,6 +191,18 @@ export function DestinationCombobox({
                 placeholder="Type Wayanad, Munnar, Varkala, Kochi..."
                 className="min-h-11 w-full rounded-xl border border-stone-200 bg-stone-50 py-2 pr-3 pl-9 text-sm text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:outline-none"
               />
+            </div>
+            <div className="mt-2 flex items-center justify-between px-1 text-[11px] text-stone-500">
+              <span>Select 1 place, or up to {MAX_STOPS} for a multi-stop route</span>
+              {places.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="font-semibold text-emerald-800 hover:underline"
+                >
+                  Done
+                </button>
+              )}
             </div>
           </div>
 
@@ -158,49 +218,61 @@ export function DestinationCombobox({
                     type="button"
                     onClick={() => handleSelectRegion(reg.name)}
                     className={`flex min-h-11 w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-semibold transition ${
-                      region === reg.name && !place
+                      region === reg.name && places.length === 0
                         ? "bg-emerald-50 text-emerald-900"
                         : "text-stone-800 hover:bg-stone-100"
                     }`}
                   >
                     <span>{reg.name}</span>
                     <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">
-                      Entire region
+                      All places
                     </span>
                   </button>
 
                   <div className="mt-1 space-y-0.5 pl-2">
                     {reg.places.map((p) => {
-                      const selected = region === reg.name && place === p.name;
+                      const selected =
+                        region === reg.name && places.includes(p.name);
                       return (
                         <button
                           key={p.name}
                           type="button"
-                          onClick={() => handleSelectPlace(reg.name, p.name)}
-                          className={`flex min-h-12 w-full flex-col rounded-xl px-3 py-2 text-left transition ${
+                          onClick={() => handleTogglePlace(reg.name, p.name)}
+                          className={`flex min-h-12 w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left transition ${
                             selected
                               ? "bg-emerald-700 text-white"
                               : "text-stone-900 hover:bg-emerald-50/70"
                           }`}
                         >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-sm font-semibold">{p.name}</span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-semibold">
+                                {p.name}
+                              </span>
+                              <span
+                                className={`text-xs ${
+                                  selected
+                                    ? "text-emerald-100"
+                                    : "text-stone-500"
+                                }`}
+                              >
+                                {p.district}
+                                {p.featured ? " · Popular" : ""}
+                              </span>
+                            </div>
                             <span
-                              className={`text-xs ${
-                                selected ? "text-emerald-100" : "text-stone-500"
+                              className={`mt-0.5 line-clamp-1 text-xs ${
+                                selected
+                                  ? "text-emerald-100/90"
+                                  : "text-stone-500"
                               }`}
                             >
-                              {p.district}
-                              {p.featured ? " · Popular" : ""}
+                              {p.highlights}
                             </span>
                           </div>
-                          <span
-                            className={`mt-0.5 line-clamp-1 text-xs ${
-                              selected ? "text-emerald-100/90" : "text-stone-500"
-                            }`}
-                          >
-                            {p.highlights}
-                          </span>
+                          {selected && (
+                            <Check className="h-4 w-4 shrink-0 text-white" />
+                          )}
                         </button>
                       );
                     })}

@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx db/migrate.ts",
     "db:seed": "tsx db/seed.ts",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test --test-concurrency=1 tests/search.test.ts tests/admin.test.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.14",

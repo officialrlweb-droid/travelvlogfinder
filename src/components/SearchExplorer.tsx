@@ -3,17 +3,21 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import {
+  Bookmark,
   Check,
+  Columns3,
   Compass,
   Filter,
   Info,
   Lock,
   PlusCircle,
   RotateCcw,
+  Route,
   Search,
   Share2,
   SlidersHorizontal,
   Sparkles,
+  Users,
   X,
 } from "lucide-react";
 import {
@@ -25,9 +29,14 @@ import {
   type Platform,
 } from "@/lib/constants/taxonomy";
 import type { SearchFilters, SearchResponse } from "@/lib/search/types";
+import {
+  useShortlist,
+  type SavedCreatorItem,
+} from "@/lib/shortlist/useShortlist";
 import { CreatorCard } from "./CreatorCard";
 import { DestinationCombobox } from "./DestinationCombobox";
 import { PlatformIcon } from "./PlatformIcon";
+import { TripBoardDrawer } from "./TripBoardDrawer";
 
 interface SearchExplorerProps {
   initialData: SearchResponse;
@@ -35,15 +44,30 @@ interface SearchExplorerProps {
 }
 
 const DAY_PRESETS = [1, 2, 3, 4, 5, 6] as const;
-
 const BUDGET_PRESETS = [4000, 5000, 8000, 10000, 15000, 20000] as const;
+const TRAVELER_OPTIONS = [
+  { value: 1, label: "Solo" },
+  { value: 2, label: "2" },
+  { value: 3, label: "3" },
+  { value: 4, label: "4" },
+  { value: 6, label: "6" },
+] as const;
 
 const QUICK_SCENARIOS = [
-  { label: "Wayanad · 2d · Rs 5,000", place: "Wayanad", days: 2, budget: 5000 },
-  { label: "Munnar · 3d · Rs 9,000", place: "Munnar", days: 3, budget: 9000 },
-  { label: "Varkala · 2d · Rs 6,000", place: "Varkala", days: 2, budget: 6000 },
-  { label: "Kochi · 2d · Rs 4,000", place: "Kochi", days: 2, budget: 4000 },
+  { label: "Wayanad · 2d · Rs 5,000", places: ["Wayanad"], days: 2, budget: 5000 },
+  {
+    label: "Wayanad + Munnar · 4d · Rs 12,000",
+    places: ["Wayanad", "Munnar"],
+    days: 4,
+    budget: 12000,
+  },
+  { label: "Varkala · 2d · Rs 6,000", places: ["Varkala"], days: 2, budget: 6000 },
+  { label: "Kochi · 2d · Rs 4,000", places: ["Kochi"], days: 2, budget: 4000 },
 ] as const;
+
+function formatInr(amount: number): string {
+  return Math.round(amount).toLocaleString("en-IN");
+}
 
 export function SearchExplorer({
   initialData,
@@ -52,8 +76,8 @@ export function SearchExplorer({
   const [region, setRegion] = useState(
     initialFilters?.region || initialData.tripSummary.region || DEFAULT_REGION
   );
-  const [place, setPlace] = useState(
-    initialFilters?.place ?? initialData.tripSummary.place ?? ""
+  const [places, setPlaces] = useState<string[]>(
+    initialFilters?.places ?? initialData.tripSummary.places ?? []
   );
   const initialDaysVal = initialFilters?.days ?? initialData.tripSummary.days;
   const [daysInput, setDaysInput] = useState(
@@ -66,6 +90,9 @@ export function SearchExplorer({
     initialFilters?.totalBudget ?? initialData.tripSummary.totalBudget;
   const [budgetInput, setBudgetInput] = useState(
     initialBudgetVal ? String(initialBudgetVal) : ""
+  );
+  const [travelers, setTravelers] = useState<number>(
+    initialFilters?.travelers ?? initialData.tripSummary.travelers ?? 1
   );
   const [keyword, setKeyword] = useState(initialFilters?.q ?? "");
   const [selectedStyles, setSelectedStyles] = useState<string[]>(
@@ -89,9 +116,16 @@ export function SearchExplorer({
   const [results, setResults] = useState<SearchResponse>(initialData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [boardView, setBoardView] = useState<"shortlist" | "compare" | null>(
+    null
+  );
+
   const resultsRef = useRef<HTMLElement>(null);
   const requestSeqRef = useRef(0);
   const skipNextDebounceRef = useRef(false);
+
+  const { items: savedItems, isSaved, toggleSave, saveMany, removeItem, clearAll } =
+    useShortlist();
 
   const parsedDays = Number(daysInput);
   const parsedBudget = Number(budgetInput);
@@ -109,18 +143,20 @@ export function SearchExplorer({
   const executeSearch = useCallback(
     async (overrides?: {
       region?: string;
-      place?: string;
+      places?: string[];
       days?: string;
       budget?: string;
+      travelers?: number;
       keyword?: string;
       styles?: string[];
       languages?: string[];
       platform?: Platform | "";
     }) => {
       const nextRegion = overrides?.region ?? region;
-      const nextPlace = overrides?.place ?? place;
+      const nextPlaces = overrides?.places ?? places;
       const nextDays = overrides?.days ?? daysInput;
       const nextBudget = overrides?.budget ?? budgetInput;
+      const nextTravelers = overrides?.travelers ?? travelers;
       const nextKeyword = overrides?.keyword ?? keyword;
       const nextStyles = overrides?.styles ?? selectedStyles;
       const nextLanguages = overrides?.languages ?? selectedLanguages;
@@ -128,23 +164,33 @@ export function SearchExplorer({
 
       const sp = new URLSearchParams();
       if (nextRegion) sp.set("region", nextRegion);
-      if (nextPlace) sp.set("place", nextPlace);
+      if (nextPlaces.length === 1) {
+        sp.set("place", nextPlaces[0]);
+      } else if (nextPlaces.length > 1) {
+        sp.set("places", nextPlaces.join(","));
+      }
       if (nextDays.trim()) sp.set("days", nextDays.trim());
       if (nextBudget.trim()) sp.set("totalBudget", nextBudget.trim());
+      if (nextTravelers > 1) sp.set("travelers", String(nextTravelers));
       if (nextKeyword.trim()) sp.set("q", nextKeyword.trim());
       if (nextPlatform) sp.set("platform", nextPlatform);
       if (nextStyles.length > 0) sp.set("styles", nextStyles.join(","));
       if (nextLanguages.length > 0) sp.set("languages", nextLanguages.join(","));
 
-      // Keep the browser URL clean and shareable for WhatsApp/copy-paste
+      // Sync shareable URL cleanly
       if (typeof window !== "undefined") {
         const shareParams = new URLSearchParams();
         if (nextRegion && nextRegion !== DEFAULT_REGION) {
           shareParams.set("region", nextRegion);
         }
-        if (nextPlace) shareParams.set("place", nextPlace);
+        if (nextPlaces.length === 1) {
+          shareParams.set("place", nextPlaces[0]);
+        } else if (nextPlaces.length > 1) {
+          shareParams.set("places", nextPlaces.join(","));
+        }
         if (nextDays.trim()) shareParams.set("days", nextDays.trim());
         if (nextBudget.trim()) shareParams.set("budget", nextBudget.trim());
+        if (nextTravelers > 1) shareParams.set("travelers", String(nextTravelers));
         if (nextKeyword.trim()) shareParams.set("q", nextKeyword.trim());
         if (nextPlatform) shareParams.set("platform", nextPlatform);
         if (nextStyles.length > 0) shareParams.set("styles", nextStyles.join(","));
@@ -152,7 +198,9 @@ export function SearchExplorer({
           shareParams.set("languages", nextLanguages.join(","));
         }
         const qs = shareParams.toString();
-        const nextUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+        const nextUrl = qs
+          ? `${window.location.pathname}?${qs}`
+          : window.location.pathname;
         window.history.replaceState(null, "", nextUrl);
       }
 
@@ -184,9 +232,10 @@ export function SearchExplorer({
     },
     [
       region,
-      place,
+      places,
       daysInput,
       budgetInput,
+      travelers,
       keyword,
       selectedStyles,
       selectedLanguages,
@@ -194,7 +243,6 @@ export function SearchExplorer({
     ]
   );
 
-  // Live debounce when typing keyword, budget, or custom days after initial render
   const didMountRef = useRef(false);
   useEffect(() => {
     if (!didMountRef.current) {
@@ -239,10 +287,16 @@ export function SearchExplorer({
     void executeSearch({ platform: nextPlatform });
   };
 
+  const handleTravelersChange = (nextCount: number) => {
+    setTravelers(nextCount);
+    void executeSearch({ travelers: nextCount });
+  };
+
   const handleQuickScenario = (scenario: (typeof QUICK_SCENARIOS)[number]) => {
     skipNextDebounceRef.current = true;
+    const nextPlaces = [...scenario.places];
     setRegion(DEFAULT_REGION);
-    setPlace(scenario.place);
+    setPlaces(nextPlaces);
     setDaysInput(String(scenario.days));
     setCustomDaysMode(scenario.days >= 7);
     setBudgetInput(String(scenario.budget));
@@ -252,7 +306,7 @@ export function SearchExplorer({
     setPlatform("");
     void executeSearch({
       region: DEFAULT_REGION,
-      place: scenario.place,
+      places: nextPlaces,
       days: String(scenario.days),
       budget: String(scenario.budget),
       keyword: "",
@@ -265,19 +319,21 @@ export function SearchExplorer({
   const handleReset = () => {
     skipNextDebounceRef.current = true;
     setRegion(DEFAULT_REGION);
-    setPlace("");
+    setPlaces([]);
     setDaysInput("");
     setCustomDaysMode(false);
     setBudgetInput("");
+    setTravelers(1);
     setKeyword("");
     setSelectedStyles([]);
     setSelectedLanguages([]);
     setPlatform("");
     void executeSearch({
       region: DEFAULT_REGION,
-      place: "",
+      places: [],
       days: "",
       budget: "",
+      travelers: 1,
       keyword: "",
       styles: [],
       languages: [],
@@ -287,32 +343,19 @@ export function SearchExplorer({
 
   const handleShareTrip = async () => {
     if (typeof window === "undefined") return;
-    const shareParams = new URLSearchParams();
-    if (region && region !== DEFAULT_REGION) shareParams.set("region", region);
-    if (place) shareParams.set("place", place);
-    if (daysInput.trim()) shareParams.set("days", daysInput.trim());
-    if (budgetInput.trim()) shareParams.set("budget", budgetInput.trim());
-    if (keyword.trim()) shareParams.set("q", keyword.trim());
-    if (platform) shareParams.set("platform", platform);
-    if (selectedStyles.length > 0) shareParams.set("styles", selectedStyles.join(","));
-    if (selectedLanguages.length > 0) {
-      shareParams.set("languages", selectedLanguages.join(","));
-    }
-    const qs = shareParams.toString();
-    const shareUrl = `${window.location.origin}${window.location.pathname}${
-      qs ? `?${qs}` : ""
-    }`;
-
+    const shareUrl = window.location.href;
+    const destLabel =
+      places.length > 0 ? places.join(" + ") : region || DEFAULT_REGION;
     const shareTitle = results.tripSummary.headerText
-      ? `TravelVlogFinder — ${place || region} (${results.tripSummary.headerText})`
-      : `TravelVlogFinder — ${place || region} travel creators`;
+      ? `TravelVlogFinder — ${destLabel} (${results.tripSummary.headerText})`
+      : `TravelVlogFinder — ${destLabel} travel creators`;
 
     if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
       try {
         await navigator.share({ title: shareTitle, url: shareUrl });
         return;
       } catch {
-        // User canceled share sheet or unsupported; fall back to clipboard
+        // Fallback to clipboard
       }
     }
 
@@ -325,6 +368,38 @@ export function SearchExplorer({
     }
   };
 
+  const handleSaveRouteCombo = () => {
+    const combo = results.tripSummary.routeCombo;
+    if (!combo) return;
+    const byId = new Map(results.creators.map((c) => [c.id, c]));
+    const toSave: SavedCreatorItem[] = [];
+    for (const id of combo.uniqueCreatorIds) {
+      const full = byId.get(id);
+      if (full) {
+        toSave.push({
+          id: full.id,
+          name: full.name,
+          platform: full.platform,
+          profileLink: full.profileLink,
+          followersRange: full.followersRange,
+          placesCovered: full.placesCovered,
+          travelStyle: full.travelStyle,
+          language: full.language,
+          budgetMinPerDay: full.budgetMinPerDay,
+          budgetMaxPerDay: full.budgetMaxPerDay,
+          minDays: full.minDays,
+          maxDays: full.maxDays,
+          verified: full.verified,
+          videoCount: full.featuredVideos.length,
+        });
+      }
+    }
+    if (toSave.length > 0) {
+      saveMany(toSave);
+      setBoardView("shortlist");
+    }
+  };
+
   const withinCount = results.creators.filter(
     (c) => c.budgetFit === "within"
   ).length;
@@ -332,8 +407,16 @@ export function SearchExplorer({
     (c) => c.budgetFit === "slightly_over"
   ).length;
 
+  const activePlaces = results.tripSummary.places ?? [];
+  const activeDestLabel =
+    activePlaces.length > 0
+      ? activePlaces.join(" + ")
+      : results.tripSummary.region;
+  const spend = results.tripSummary.spendBreakdown;
+  const routeCombo = results.tripSummary.routeCombo;
+
   return (
-    <div className="min-h-screen pb-16">
+    <div className="min-h-screen pb-24">
       {/* Top Hero + Navigation */}
       <header className="relative overflow-hidden bg-gradient-to-br from-emerald-950 via-emerald-900 to-teal-900 text-white">
         <div
@@ -385,15 +468,15 @@ export function SearchExplorer({
               <span className="text-emerald-200">your budget &amp; days</span>
             </h1>
             <p className="mt-2.5 text-sm leading-relaxed text-emerald-100/90 sm:text-base">
-              Pick a place in Kerala, your trip length, and your INR budget for
-              stay, food, and local travel. We match YouTube &amp; Instagram
-              creators whose itineraries genuinely fit.
+              Pick 1 to 3 Kerala stops, trip days, and INR budget for stay,
+              food, and local travel. Match creators, compare side-by-side, and
+              share to your trip group.
             </p>
           </div>
         </div>
       </header>
 
-      {/* Main Search Panel overlapping hero */}
+      {/* Main Search Panel */}
       <main className="relative z-10 mx-auto -mt-14 max-w-5xl px-4 sm:px-6">
         <section
           aria-label="Trip search form"
@@ -402,15 +485,18 @@ export function SearchExplorer({
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Primary 3-column search inputs */}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
-              {/* Destination */}
+              {/* Destination (1-3 stops) */}
               <div className="md:col-span-4">
                 <DestinationCombobox
                   region={region}
-                  place={place}
-                  onChange={({ region: nextReg, place: nextPlace }) => {
+                  places={places}
+                  onChange={({ region: nextReg, places: nextPlaces }) => {
                     setRegion(nextReg);
-                    setPlace(nextPlace);
-                    void executeSearch({ region: nextReg, place: nextPlace });
+                    setPlaces(nextPlaces);
+                    void executeSearch({
+                      region: nextReg,
+                      places: nextPlaces,
+                    });
                   }}
                 />
               </div>
@@ -493,11 +579,13 @@ export function SearchExplorer({
                     htmlFor="total-budget-input"
                     className="block whitespace-nowrap text-xs font-semibold uppercase tracking-wide text-stone-600"
                   >
-                    Total budget (INR)
+                    {travelers > 1
+                      ? "Budget / person (INR)"
+                      : "Total budget (INR)"}
                   </label>
                   {livePerDay !== null && (
                     <span className="whitespace-nowrap text-xs font-bold text-emerald-700">
-                      Rs {livePerDay.toLocaleString("en-IN")}/day
+                      Rs {formatInr(livePerDay)}/day
                     </span>
                   )}
                 </div>
@@ -596,10 +684,9 @@ export function SearchExplorer({
               </div>
             </div>
 
-            {/* Collapsible Optional Filters (Platform, Travel Style, Language) */}
+            {/* Collapsible Optional Filters */}
             {showOptionalFilters && (
               <div className="space-y-4 rounded-2xl border border-stone-200 bg-stone-50/70 p-4">
-                {/* Platform */}
                 <div>
                   <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-stone-600">
                     Platform
@@ -634,7 +721,6 @@ export function SearchExplorer({
                   </div>
                 </div>
 
-                {/* Travel Style Multi-Select */}
                 <div>
                   <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-stone-600">
                     Travel style (multi-select)
@@ -661,7 +747,6 @@ export function SearchExplorer({
                   </div>
                 </div>
 
-                {/* Language Multi-Select */}
                 <div>
                   <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-stone-600">
                     Language (multi-select)
@@ -690,7 +775,7 @@ export function SearchExplorer({
               </div>
             )}
 
-            {/* Quick-try Kerala presets */}
+            {/* Quick-try presets */}
             <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="inline-flex items-center gap-1 text-xs font-semibold text-stone-500">
@@ -723,24 +808,20 @@ export function SearchExplorer({
 
         {/* Results Section */}
         <section ref={resultsRef} className="mt-7" aria-live="polite">
-          {/* Trip Summary Header + Budget Scope Note */}
+          {/* Trip Summary Header + Group Split + Spend Breakdown + Disclaimer */}
           <div className="rounded-2xl border border-stone-200/90 bg-white p-4 shadow-xs sm:p-5">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-lg font-extrabold tracking-tight text-stone-900 sm:text-xl">
                   {results.tripSummary.headerText
                     ? results.tripSummary.headerText
-                    : `Exploring ${
-                        results.tripSummary.place
-                          ? `${results.tripSummary.place}, `
-                          : ""
-                      }${results.tripSummary.region}`}
+                    : `Exploring ${activeDestLabel}`}
                 </h2>
                 <p className="mt-0.5 text-sm text-stone-600">
                   {results.totalCount}{" "}
                   {results.totalCount === 1 ? "creator" : "creators"} matched
-                  {results.tripSummary.place
-                    ? ` for ${results.tripSummary.place}`
+                  {activePlaces.length > 0
+                    ? ` for ${activePlaces.join(" + ")}`
                     : ` across ${results.tripSummary.region}`}
                   {results.tripSummary.perDayBudget !== null &&
                   results.totalCount > 0 ? (
@@ -759,7 +840,9 @@ export function SearchExplorer({
                 {results.tripSummary.perDayBudget !== null && (
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-stone-100 px-3 py-1.5 text-xs font-semibold text-stone-700">
                     <Filter className="h-3.5 w-3.5 text-emerald-700" />
-                    Sorted: Exact budget match first, then closest
+                    {activePlaces.length > 1
+                      ? "Sorted: Most stops covered, then exact budget"
+                      : "Sorted: Exact budget match first, then closest"}
                   </div>
                 )}
                 <button
@@ -782,6 +865,100 @@ export function SearchExplorer({
               </div>
             </div>
 
+            {/* Group Split + Per-Day Spend Breakdown Bar */}
+            {spend && (
+              <div className="mt-4 rounded-xl border border-stone-200/80 bg-stone-50/70 p-3.5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-600">
+                    <span className="font-semibold text-stone-900">
+                      Typical daily split:
+                    </span>
+                    <span>
+                      Stay{" "}
+                      <strong className="text-stone-900">
+                        ~Rs {formatInr(spend.stayPerDay)}
+                      </strong>
+                    </span>
+                    <span>
+                      Food{" "}
+                      <strong className="text-stone-900">
+                        ~Rs {formatInr(spend.foodPerDay)}
+                      </strong>
+                    </span>
+                    <span>
+                      Local travel{" "}
+                      <strong className="text-stone-900">
+                        ~Rs {formatInr(spend.localTravelPerDay)}
+                      </strong>
+                    </span>
+                  </div>
+
+                  {/* Clean Group Size Selector */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-stone-500">
+                      <Users className="h-3.5 w-3.5" />
+                      Group:
+                    </span>
+                    <div className="inline-flex rounded-lg border border-stone-200 bg-white p-0.5">
+                      {TRAVELER_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => handleTravelersChange(opt.value)}
+                          className={`min-h-8 rounded-md px-2.5 text-xs font-semibold transition ${
+                            travelers === opt.value
+                              ? "bg-emerald-700 text-white"
+                              : "text-stone-600 hover:bg-stone-100"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Minimal 3-segment bar */}
+                <div className="mt-2.5 flex h-1.5 overflow-hidden rounded-full bg-stone-200">
+                  <div
+                    className="bg-emerald-700"
+                    style={{ width: "48%" }}
+                    title="Stay (~48%)"
+                  />
+                  <div
+                    className="bg-emerald-400"
+                    style={{ width: "28%" }}
+                    title="Food (~28%)"
+                  />
+                  <div
+                    className="bg-stone-400"
+                    style={{ width: "24%" }}
+                    title="Local travel (~24%)"
+                  />
+                </div>
+
+                {spend.travelers > 1 && results.tripSummary.totalBudget && (
+                  <p className="mt-2.5 text-xs text-stone-600">
+                    <strong className="text-stone-900">
+                      {spend.travelers} travelers pool:
+                    </strong>{" "}
+                    Rs{" "}
+                    {formatInr(
+                      results.tripSummary.totalBudget * spend.travelers
+                    )}{" "}
+                    total trip budget · Shared room power{" "}
+                    <strong className="text-emerald-800">
+                      ~Rs {formatInr(spend.sharedRoomBudgetPerNight)}/night
+                    </strong>{" "}
+                    · Shared jeep/cab pool{" "}
+                    <strong className="text-emerald-800">
+                      ~Rs {formatInr(spend.sharedLocalTravelPerDay)}/day
+                    </strong>
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Required Budget Scope Disclaimer */}
             <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200/80 bg-amber-50/70 px-3.5 py-2.5 text-xs font-medium text-amber-950 sm:text-sm">
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
@@ -790,6 +967,71 @@ export function SearchExplorer({
               </span>
             </div>
           </div>
+
+          {/* Multi-Stop Route Watchlist Combo Card (2-3 stops selected) */}
+          {routeCombo && routeCombo.uniqueCreatorIds.length > 0 && (
+            <div className="mt-4 rounded-2xl border border-emerald-200 bg-white p-4 shadow-xs sm:p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-2.5">
+                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                    <Route className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <h3 className="text-sm font-bold text-stone-900 sm:text-base">
+                      {routeCombo.allStopsCoveredBySingleCreator
+                        ? `Multi-Stop Route: ${activePlaces.join(" -> ")}`
+                        : `Recommended Route Watchlist: ${activePlaces.join(" -> ")}`}
+                    </h3>
+                    <p className="text-xs text-stone-600">
+                      {routeCombo.allStopsCoveredBySingleCreator
+                        ? "Creators covering all selected stops appear at the top below."
+                        : "No single creator covers every stop — here is the best budget-matched pairing per stop."}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSaveRouteCombo}
+                  className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white transition hover:bg-emerald-800"
+                >
+                  <Bookmark className="h-3.5 w-3.5" />
+                  Save route to Trip Board
+                </button>
+              </div>
+
+              <div className="mt-3.5 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                {routeCombo.stops.map((stop, idx) => (
+                  <div
+                    key={stop.place}
+                    className="rounded-xl border border-stone-200 bg-stone-50/70 p-3"
+                  >
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-emerald-800">
+                      Stop {idx + 1} · {stop.place}
+                    </p>
+                    {stop.creator ? (
+                      <div className="mt-1">
+                        <Link
+                          href={`/creators/${stop.creator.id}`}
+                          className="line-clamp-1 text-sm font-bold text-stone-900 hover:text-emerald-800 hover:underline"
+                        >
+                          {stop.creator.name}
+                        </Link>
+                        <p className="mt-0.5 text-xs text-stone-600">
+                          Rs {formatInr(stop.creator.budgetMinPerDay)} –{" "}
+                          {formatInr(stop.creator.budgetMaxPerDay)}/day
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-xs text-stone-500">
+                        No matching creator for this stop &amp; budget yet.
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800">
@@ -823,14 +1065,62 @@ export function SearchExplorer({
                 <CreatorCard
                   key={creator.id}
                   creator={creator}
-                  selectedPlace={results.tripSummary.place}
+                  selectedPlaces={activePlaces}
                   selectedDays={results.tripSummary.days}
+                  selectedBudget={results.tripSummary.totalBudget}
+                  travelers={results.tripSummary.travelers}
+                  saved={isSaved(creator.id)}
+                  onToggleSave={toggleSave}
                 />
               ))}
             </div>
           )}
         </section>
       </main>
+
+      {/* Subtle Floating Trip Board & Compare Bar (visible when 1+ saved) */}
+      {savedItems.length > 0 && (
+        <div className="fixed right-4 bottom-4 z-40 flex items-center gap-2 rounded-2xl border border-stone-200 bg-white p-1.5 shadow-xl shadow-stone-900/15 sm:right-6 sm:bottom-6">
+          <button
+            type="button"
+            onClick={() => setBoardView("shortlist")}
+            className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-emerald-700 px-4 text-xs font-bold text-white transition hover:bg-emerald-800 sm:text-sm"
+          >
+            <Bookmark className="h-4 w-4 fill-current" />
+            Trip Board ({savedItems.length})
+          </button>
+          {savedItems.length >= 2 && (
+            <button
+              type="button"
+              onClick={() => setBoardView("compare")}
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-stone-100 px-3.5 text-xs font-bold text-stone-800 transition hover:bg-stone-200 sm:text-sm"
+            >
+              <Columns3 className="h-4 w-4 text-emerald-700" />
+              Compare
+            </button>
+          )}
+        </div>
+      )}
+
+      {boardView && (
+        <TripBoardDrawer
+          items={savedItems}
+          initialView={boardView}
+          days={results.tripSummary.days}
+          travelers={results.tripSummary.travelers}
+          tripLabel={
+            results.tripSummary.headerText
+              ? `${activeDestLabel} · ${results.tripSummary.headerText.replace(
+                  "Your trip: ",
+                  ""
+                )}`
+              : activeDestLabel
+          }
+          onRemove={removeItem}
+          onClearAll={clearAll}
+          onClose={() => setBoardView(null)}
+        />
+      )}
     </div>
   );
 }

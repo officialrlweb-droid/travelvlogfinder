@@ -34,24 +34,36 @@ export default async function HomePage({
     // Default landing view: Wayanad · 2 days · Rs 5,000 (Rs 2,500/day)
     initialFilters = {
       region: DEFAULT_REGION,
-      place: "Wayanad",
+      places: ["Wayanad"],
       days: 2,
       totalBudget: 5000,
+      travelers: 1,
     };
   } else {
     const rawDays = firstString(sp.days);
     const parsedDays = rawDays ? Number(rawDays) : undefined;
     const rawBudget = firstString(sp.budget) ?? firstString(sp.totalBudget);
     const parsedBudget = rawBudget ? Number(rawBudget) : undefined;
+    const rawTravelers = firstString(sp.travelers);
+    const parsedTravelers = rawTravelers ? Number(rawTravelers) : 1;
     const rawPlatform = firstString(sp.platform)?.toLowerCase();
     const platform: Platform | undefined =
       rawPlatform === "youtube" || rawPlatform === "instagram"
         ? rawPlatform
         : undefined;
 
+    const multiPlaces = parseList(sp.places);
+    const singlePlace = firstString(sp.place);
+    const places =
+      multiPlaces.length > 0
+        ? multiPlaces.slice(0, 3)
+        : singlePlace
+          ? [singlePlace]
+          : [];
+
     initialFilters = {
       region: firstString(sp.region) || DEFAULT_REGION,
-      place: firstString(sp.place),
+      places,
       days:
         parsedDays && Number.isFinite(parsedDays) && parsedDays >= 1
           ? Math.floor(parsedDays)
@@ -60,6 +72,12 @@ export default async function HomePage({
         parsedBudget && Number.isFinite(parsedBudget) && parsedBudget > 0
           ? Math.round(parsedBudget)
           : undefined,
+      travelers:
+        parsedTravelers &&
+        Number.isFinite(parsedTravelers) &&
+        parsedTravelers >= 1
+          ? Math.min(20, Math.floor(parsedTravelers))
+          : 1,
       styles: parseList(sp.styles),
       languages: parseList(sp.languages),
       platform,
